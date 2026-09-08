@@ -1,4 +1,6 @@
--- Steal an Egg - Full Script
+-- Steal an Egg - Aggressive Override (Speed + Fly Fix)
+-- Forces WalkSpeed and Fly every frame using multiple methods
+
 local player = game.Players.LocalPlayer
 local character = player.Character or player.CharacterAdded:Wait()
 local humanoid = character:WaitForChild("Humanoid")
@@ -7,18 +9,22 @@ local runService = game:GetService("RunService")
 local userInputService = game:GetService("UserInputService")
 local camera = workspace.CurrentCamera
 
+-- Base values
 local BASE_WALK = 16
 local BASE_FLY = 60
 local walkMult = 1
 local flyMult = 1
 local flying = false
 
+-- Fly using BodyVelocity with extreme force
 local bv = Instance.new("BodyVelocity")
 bv.MaxForce = Vector3.new(9e9, 9e9, 9e9)
 bv.Velocity = Vector3.new(0, 0, 0)
 
+-- WASD keys
 local keys = {W=false, S=false, A=false, D=false, Space=false, Shift=false}
 
+-- Godmode
 local function godmode(char)
     local h = char:FindFirstChild("Humanoid")
     if h then
@@ -28,25 +34,47 @@ local function godmode(char)
     end
 end
 godmode(character)
-player.CharacterAdded:Connect(godmode)
+player.CharacterAdded:Connect(function(char)
+    character = char
+    humanoid = char:WaitForChild("Humanoid")
+    godmode(char)
+    -- Reattach fly
+    if flying then
+        bv.Parent = character.HumanoidRootPart
+    end
+end)
 
+-- Walk speed: force every frame + property change
 local function applyWalk()
     if humanoid then
         humanoid.WalkSpeed = BASE_WALK * walkMult
+        -- Also set root velocity to match (bypass server override)
+        local root = character and character.HumanoidRootPart
+        if root then
+            local vel = root.Velocity
+            local moveDir = vel.Unit
+            if vel.Magnitude > 1 then
+                root.Velocity = moveDir * (BASE_WALK * walkMult)
+            end
+        end
     end
 end
 if humanoid then
     humanoid:GetPropertyChangedSignal("WalkSpeed"):Connect(applyWalk)
 end
 
+-- Fly toggle
 local function toggleFly()
     flying = not flying
     if flying then
-        bv.Parent = character.HumanoidRootPart
+        if character and character.HumanoidRootPart then
+            bv.Parent = character.HumanoidRootPart
+        end
     else
         bv.Parent = nil
         bv.Velocity = Vector3.new(0, 0, 0)
     end
+    -- Update UI button
     local btn = player.PlayerGui:FindFirstChild("EggStealUI") and 
                 player.PlayerGui.EggStealUI:FindFirstChild("MainFrame") and
                 player.PlayerGui.EggStealUI.MainFrame:FindFirstChild("FlyToggle")
@@ -56,6 +84,7 @@ local function toggleFly()
     end
 end
 
+-- Key tracking
 local function onKey(input, state)
     if input.UserInputType ~= Enum.UserInputType.Keyboard then return end
     local k = input.KeyCode
@@ -69,17 +98,24 @@ end
 userInputService.InputBegan:Connect(function(i) onKey(i, true) end)
 userInputService.InputEnded:Connect(function(i) onKey(i, false) end)
 
+-- Main loop: force walk and fly
 runService.Heartbeat:Connect(function()
+    -- 1. Force Walk Speed
     applyWalk()
+
+    -- 2. Fly logic
     if not flying then return end
     if not character or not character.HumanoidRootPart then return end
+
     local root = character.HumanoidRootPart
     local cf = camera.CFrame
     local forward = cf.LookVector
     local right = cf.RightVector
     local up = cf.UpVector
+
     forward = Vector3.new(forward.X, 0, forward.Z).Unit
     right = Vector3.new(right.X, 0, right.Z).Unit
+
     local move = Vector3.new(0, 0, 0)
     if keys.W then move = move + forward end
     if keys.S then move = move - forward end
@@ -87,21 +123,31 @@ runService.Heartbeat:Connect(function()
     if keys.D then move = move + right end
     if keys.Space then move = move + up end
     if keys.Shift then move = move - up end
+
     local speed = BASE_FLY * flyMult
     if move.Magnitude > 0.01 then
-        bv.Velocity = move.Unit * speed
+        local vel = move.Unit * speed
+        bv.Velocity = vel
+        -- Also directly set root velocity for backup
+        root.Velocity = vel
     else
         bv.Velocity = Vector3.new(0, 0, 0)
+        -- If no input, stop slowly
+        root.Velocity = root.Velocity * 0.9
     end
+
+    -- Reattach if game removed it
     if bv.Parent ~= root then
         bv.Parent = root
     end
 end)
 
+-- F key toggle
 mouse.KeyDown:Connect(function(k)
     if k:lower() == "f" then toggleFly() end
 end)
 
+-- Auto Steal and Hatch (same as before)
 local function getEggs()
     local eggs = {}
     for _, obj in pairs(workspace:GetDescendants()) do
@@ -160,7 +206,9 @@ spawn(function()
     end
 end)
 
--- UI
+-- -----------------------------------------------------------------
+-- UI (Same as previous, no changes needed)
+-- -----------------------------------------------------------------
 local gui = Instance.new("ScreenGui")
 gui.Name = "EggStealUI"
 gui.Parent = player.PlayerGui
@@ -317,4 +365,4 @@ makeSlider(walkSlider, walkFill, walkDrag, walkLabel, 1, 100, "Walk Multiplier",
     applyWalk()
 end)
 
-print("Steal an Egg script loaded. F to toggle fly. WASD + Space/Shift for fly.")
+print("Aggressive override loaded. Speed and fly forced every frame.")
