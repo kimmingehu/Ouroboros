@@ -1,27 +1,25 @@
--- Steal an Egg - Aggressive Override (Speed + Fly Fix)
--- Forces WalkSpeed and Fly every frame using multiple methods
+-- Steal an Egg - Direct CFrame Movement (Bypasses all speed limits)
+-- Walk and Fly both use CFrame manipulation. Game cannot override.
 
 local player = game.Players.LocalPlayer
 local character = player.Character or player.CharacterAdded:Wait()
 local humanoid = character:WaitForChild("Humanoid")
+local root = character:WaitForChild("HumanoidRootPart")
 local mouse = player:GetMouse()
 local runService = game:GetService("RunService")
 local userInputService = game:GetService("UserInputService")
 local camera = workspace.CurrentCamera
 
--- Base values
-local BASE_WALK = 16
-local BASE_FLY = 60
+-- Multipliers
 local walkMult = 1
 local flyMult = 1
 local flying = false
 
--- Fly using BodyVelocity with extreme force
-local bv = Instance.new("BodyVelocity")
-bv.MaxForce = Vector3.new(9e9, 9e9, 9e9)
-bv.Velocity = Vector3.new(0, 0, 0)
+-- Base speeds (units per second)
+local BASE_WALK = 20
+local BASE_FLY = 50
 
--- WASD keys
+-- WASD + Space/Shift
 local keys = {W=false, S=false, A=false, D=false, Space=false, Shift=false}
 
 -- Godmode
@@ -37,43 +35,13 @@ godmode(character)
 player.CharacterAdded:Connect(function(char)
     character = char
     humanoid = char:WaitForChild("Humanoid")
+    root = char:WaitForChild("HumanoidRootPart")
     godmode(char)
-    -- Reattach fly
-    if flying then
-        bv.Parent = character.HumanoidRootPart
-    end
 end)
-
--- Walk speed: force every frame + property change
-local function applyWalk()
-    if humanoid then
-        humanoid.WalkSpeed = BASE_WALK * walkMult
-        -- Also set root velocity to match (bypass server override)
-        local root = character and character.HumanoidRootPart
-        if root then
-            local vel = root.Velocity
-            local moveDir = vel.Unit
-            if vel.Magnitude > 1 then
-                root.Velocity = moveDir * (BASE_WALK * walkMult)
-            end
-        end
-    end
-end
-if humanoid then
-    humanoid:GetPropertyChangedSignal("WalkSpeed"):Connect(applyWalk)
-end
 
 -- Fly toggle
 local function toggleFly()
     flying = not flying
-    if flying then
-        if character and character.HumanoidRootPart then
-            bv.Parent = character.HumanoidRootPart
-        end
-    else
-        bv.Parent = nil
-        bv.Velocity = Vector3.new(0, 0, 0)
-    end
     -- Update UI button
     local btn = player.PlayerGui:FindFirstChild("EggStealUI") and 
                 player.PlayerGui.EggStealUI:FindFirstChild("MainFrame") and
@@ -98,56 +66,64 @@ end
 userInputService.InputBegan:Connect(function(i) onKey(i, true) end)
 userInputService.InputEnded:Connect(function(i) onKey(i, false) end)
 
--- Main loop: force walk and fly
-runService.Heartbeat:Connect(function()
-    -- 1. Force Walk Speed
-    applyWalk()
+-- Main movement loop (CFrame based)
+runService.Heartbeat:Connect(function(deltaTime)
+    if not character or not root or not humanoid then return end
 
-    -- 2. Fly logic
-    if not flying then return end
-    if not character or not character.HumanoidRootPart then return end
+    -- 1. Walking (only when not flying)
+    if not flying then
+        local cf = camera.CFrame
+        local forward = cf.LookVector
+        local right = cf.RightVector
+        forward = Vector3.new(forward.X, 0, forward.Z).Unit
+        right = Vector3.new(right.X, 0, right.Z).Unit
 
-    local root = character.HumanoidRootPart
-    local cf = camera.CFrame
-    local forward = cf.LookVector
-    local right = cf.RightVector
-    local up = cf.UpVector
+        local move = Vector3.new(0, 0, 0)
+        if keys.W then move = move + forward end
+        if keys.S then move = move - forward end
+        if keys.A then move = move - right end
+        if keys.D then move = move + right end
 
-    forward = Vector3.new(forward.X, 0, forward.Z).Unit
-    right = Vector3.new(right.X, 0, right.Z).Unit
-
-    local move = Vector3.new(0, 0, 0)
-    if keys.W then move = move + forward end
-    if keys.S then move = move - forward end
-    if keys.A then move = move - right end
-    if keys.D then move = move + right end
-    if keys.Space then move = move + up end
-    if keys.Shift then move = move - up end
-
-    local speed = BASE_FLY * flyMult
-    if move.Magnitude > 0.01 then
-        local vel = move.Unit * speed
-        bv.Velocity = vel
-        -- Also directly set root velocity for backup
-        root.Velocity = vel
-    else
-        bv.Velocity = Vector3.new(0, 0, 0)
-        -- If no input, stop slowly
-        root.Velocity = root.Velocity * 0.9
+        if move.Magnitude > 0.01 then
+            local speed = BASE_WALK * walkMult
+            local step = move.Unit * speed * deltaTime
+            root.CFrame = root.CFrame + step
+            -- Keep character upright
+            root.CFrame = CFrame.new(root.Position, root.Position + forward)
+        end
     end
 
-    -- Reattach if game removed it
-    if bv.Parent ~= root then
-        bv.Parent = root
+    -- 2. Flying (when enabled)
+    if flying then
+        local cf = camera.CFrame
+        local forward = cf.LookVector
+        local right = cf.RightVector
+        local up = cf.UpVector
+        forward = Vector3.new(forward.X, 0, forward.Z).Unit
+        right = Vector3.new(right.X, 0, right.Z).Unit
+
+        local move = Vector3.new(0, 0, 0)
+        if keys.W then move = move + forward end
+        if keys.S then move = move - forward end
+        if keys.A then move = move - right end
+        if keys.D then move = move + right end
+        if keys.Space then move = move + up end
+        if keys.Shift then move = move - up end
+
+        if move.Magnitude > 0.01 then
+            local speed = BASE_FLY * flyMult
+            local step = move.Unit * speed * deltaTime
+            root.CFrame = root.CFrame + step
+        end
     end
 end)
 
--- F key toggle
+-- F key toggle fly
 mouse.KeyDown:Connect(function(k)
     if k:lower() == "f" then toggleFly() end
 end)
 
--- Auto Steal and Hatch (same as before)
+-- Auto Steal (big eggs first)
 local function getEggs()
     local eggs = {}
     for _, obj in pairs(workspace:GetDescendants()) do
@@ -182,6 +158,7 @@ spawn(function()
     end
 end)
 
+-- Auto Hatch
 local function hatchEgg(egg)
     if not egg then return end
     local remote = game:GetService("ReplicatedStorage"):FindFirstChild("HatchEgg")
@@ -207,7 +184,7 @@ spawn(function()
 end)
 
 -- -----------------------------------------------------------------
--- UI (Same as previous, no changes needed)
+-- UI (unchanged, sliders control multipliers)
 -- -----------------------------------------------------------------
 local gui = Instance.new("ScreenGui")
 gui.Name = "EggStealUI"
@@ -244,6 +221,7 @@ title.TextSize = 18
 title.Font = Enum.Font.GothamBold
 title.Parent = frame
 
+-- Fly slider
 local flyLabel = Instance.new("TextLabel")
 flyLabel.Size = UDim2.new(0.5, -5, 0, 20)
 flyLabel.Position = UDim2.new(0, 5, 0, 30)
@@ -280,6 +258,7 @@ flyDrag.Text = ""
 flyDrag.Parent = flySlider
 local c3 = Instance.new("UICorner"); c3.CornerRadius = UDim.new(1,0); c3.Parent = flyDrag
 
+-- Walk slider
 local walkLabel = Instance.new("TextLabel")
 walkLabel.Size = UDim2.new(0.5, -5, 0, 20)
 walkLabel.Position = UDim2.new(0, 5, 0, 80)
@@ -316,6 +295,7 @@ walkDrag.Text = ""
 walkDrag.Parent = walkSlider
 local c6 = Instance.new("UICorner"); c6.CornerRadius = UDim.new(1,0); c6.Parent = walkDrag
 
+-- Fly toggle button
 local flyBtn = Instance.new("TextButton")
 flyBtn.Name = "FlyToggle"
 flyBtn.Size = UDim2.new(0, 70, 0, 26)
@@ -331,6 +311,7 @@ flyBtn.Parent = frame
 local tc = Instance.new("UICorner"); tc.CornerRadius = UDim.new(0,4); tc.Parent = flyBtn
 flyBtn.MouseButton1Click:Connect(toggleFly)
 
+-- Slider logic
 local function makeSlider(slider, fill, drag, label, min, max, name, callback)
     local dragging = false
     drag.MouseButton1Down:Connect(function() dragging = true end)
@@ -362,7 +343,7 @@ end)
 
 makeSlider(walkSlider, walkFill, walkDrag, walkLabel, 1, 100, "Walk Multiplier", function(v)
     walkMult = v
-    applyWalk()
 end)
 
-print("Aggressive override loaded. Speed and fly forced every frame.")
+print("CFrame movement script loaded. Walk and Fly bypass all game limits.")
+print("F to toggle fly. WASD to move. Space up, Shift down.")
